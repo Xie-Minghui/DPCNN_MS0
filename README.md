@@ -1,2 +1,24 @@
-# DPCNN_MS0
-使用华为MindSpore框架实现DPCNN，对电影评论进行分类
+## DPCNN_MS
+#### 项目总体结构
+该项目使用华为的MindSpore框架实现DPCNN，能够对英文评论进行二分类。
+
+#### 环境依赖
+详情见requirements.txt
+
+#### 数据集介绍
+下载链接：
+www.cs.cornell.edu/people/pabo/movie-review-data/rt-polaritydata.tar.gz
+  * rt-polarity.pos contains 5331 positive snippets
+  * rt-polarity.neg contains 5331 negative snippets
+
+
+#### 训练
+python trainer.py -pre=1
+-pre参数控制是否使用预训练词向量，1表示使用，0表示不使用
+
+#### 测试
+边训练边测试
+
+
+
+
