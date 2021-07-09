@@ -1,7 +1,4 @@
-import os, sys
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # __file__获取执行文件相对路径，整行为取上一级的上一级目录
-sys.path.append(BASE_DIR)
 import mindspore
 import mindspore.nn as nn
 from src.config import config
@@ -20,16 +17,14 @@ class DPCNN(nn.Cell):
             self.embedding_layer = nn.Embedding(config.vocab_size, config.embedding_dim)
         
         si = 3
-        # print('haoa')
         self.region_embedding = nn.Conv2d(1, config.num_filter, (si, config.embedding_dim), stride=1, pad_mode='valid')
         self.conv = nn.Conv2d(config.num_filter, config.num_filter, (si, 1), stride=1, pad_mode='valid')
         self.act_fun = nn.ReLU()
-        self.fc = nn.Dense(config.num_filter, config.num_rel, activation=nn.ReLU())
+        self.fc = nn.Dense(config.num_filter, config.num_rel)  # , activation=nn.ReLU()
         self.padding0 = nn.Pad(paddings=((0,0),(0,0),(1,1),(0,0)), mode="CONSTANT")  # 针对行，上下添加一行0
         self.padding1 = nn.Pad(paddings=((0,0),(0,0),(0,1),(0,0)), mode="CONSTANT")  # 下添加一行0 
         self.pooling = nn.MaxPool2d(kernel_size=(si, 1), stride=2)
         self.batch_normer = nn.BatchNorm2d(num_features=1)
-
         self.att_layer = AttentionLayer(config.num_filter)
 
     def construct(self, X):
@@ -38,21 +33,18 @@ class DPCNN(nn.Cell):
         word_embeddings = self.batch_normer(word_embeddings)  # 可以加速到达性能瓶颈
         # word_embeddings = self.dropout2(word_embeddings)
         region_word_embeddings = self.region_embedding(word_embeddings)  # [batch_size, num_filter, seq_len-3+1, 1]
-        x = self.att_layer(region_word_embeddings)
         # region_word_embeddings = self.dropout2(region_word_embeddings)  # 负作用
         x = self.padding0(region_word_embeddings)  # [batch_size, num_filter, seq_len, 1]
-        x = self.conv(self.act_fun(region_word_embeddings))  # [batch_size, num_filter, seq_len-3+1, 1]
-        x = self.padding0(x)  # [batch_size, num_filter, seq_len, 1]
-
         x = self.conv(self.act_fun(x))  # [batch_size, num_filter, seq_len-3+1, 1]
-        x = self.padding0(x)
+
+        x = self.padding0(x)  # [batch_size, num_filter, seq_len, 1]
+        x = self.conv(self.act_fun(x))  # [batch_size, num_filter, seq_len-3+1, 1]
+        region_word_embeddings = self.att_layer(region_word_embeddings)
         x = x + region_word_embeddings  # 残差连接
         
         while x.shape[-2] >= 2:  # 直到的seq_len数量减少到1
             x = self._block(x)
-
         x = ops.Squeeze()(x)  # [batch_size, num_filter, 1, 1] -> [batch_size, num_filters]
-
         x = self.fc(x)
 
         return x
@@ -75,9 +67,10 @@ class DPCNN(nn.Cell):
         return x
         
 class AttentionLayer(nn.Cell):
-    def __init__(self, channel, reduction=16, multiply=False):  # 设置为True的时候，直接停止更新，0.48
+    def __init__(self, channel, reduction=16, multiply=True):  # 设置为True的时候，直接停止更新，0.48
         super(AttentionLayer, self).__init__()
-        self.avg_pool = nn.AvgPool2d(1)
+        # self.avg_pool = nn.AvgPool2d(1)
+        self.avg_pool = ops.ReduceMean()
         self.fc = nn.SequentialCell(
                 nn.Dense(channel, channel // reduction),
                 nn.ReLU(),
@@ -85,9 +78,9 @@ class AttentionLayer(nn.Cell):
                 nn.Sigmoid()
                 )
         self.multiply = multiply
-    def forward(self, x):
-        b, c, _, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
+    def construct(self, x):
+        b, c, _, _ = x.shape
+        y = self.avg_pool(x, 2).view(b, c)
         y = self.fc(y).view(b, c, 1, 1)
         if self.multiply == True:
             return x * y
